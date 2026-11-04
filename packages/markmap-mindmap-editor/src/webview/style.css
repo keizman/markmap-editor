@@ -1,0 +1,215 @@
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  --mm-bg: var(--vscode-editor-background, #fff);
+  --mm-fg: var(--vscode-editor-foreground, #333);
+  --mm-accent: var(--vscode-focusBorder, #0078d4);
+  --mm-panel-bg: var(--vscode-editorWidget-background, #f3f3f3);
+  --mm-panel-border: var(--vscode-editorWidget-border, #ccc);
+  --mm-button-bg: var(--vscode-button-secondaryBackground, #e5e5e5);
+  --mm-button-fg: var(--vscode-button-secondaryForeground, #333);
+  --mm-button-hover: var(--vscode-button-secondaryHoverBackground, #d5d5d5);
+  background: var(--mm-bg);
+  color: var(--mm-fg);
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+}
+
+#app {
+  position: relative;
+}
+
+.mm-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+svg.markmap {
+  --markmap-text-color: var(--mm-fg);
+  --markmap-circle-open-bg: var(--mm-bg);
+  --markmap-code-bg: var(--vscode-textCodeBlock-background, #f0f0f0);
+  --markmap-code-color: var(--vscode-textPreformat-foreground, #555);
+  --markmap-a-color: var(--vscode-textLink-foreground, #0097e6);
+  --markmap-a-hover-color: var(--vscode-textLink-activeForeground, #00a8ff);
+}
+
+.markmap-foreign {
+  user-select: none;
+  cursor: default;
+}
+
+.is-editing .markmap-foreign,
+.is-dragging .markmap-foreign {
+  cursor: default;
+}
+
+.mm-selection {
+  fill: color-mix(in srgb, var(--mm-accent) 18%, transparent);
+  stroke: var(--mm-accent);
+  stroke-width: 1.5px;
+  pointer-events: none;
+}
+
+.mm-drop {
+  fill: color-mix(in srgb, var(--mm-accent) 30%, transparent);
+  stroke: var(--mm-accent);
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+.mm-drop-line {
+  fill: var(--mm-accent);
+  stroke: none;
+}
+
+/* The input doubles as the keyboard sink and the inline text editor. */
+.mm-input {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+  white-space: pre;
+  font: 300 16px/20px sans-serif;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  z-index: 10;
+}
+
+.mm-input.editing {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--vscode-input-foreground, var(--mm-fg));
+  caret-color: auto;
+  background: var(--vscode-input-background, #fff);
+  box-shadow: 0 0 0 2px var(--mm-accent);
+  border-radius: 2px;
+  padding: 0 4px;
+  margin-left: -4px;
+}
+
+.mm-input.editing.multiline {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 13px;
+  white-space: pre;
+}
+
+.mm-toolbar {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  padding: 4px;
+  background: var(--mm-panel-bg);
+  border: 1px solid var(--mm-panel-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 5;
+}
+
+.mm-toolbar button {
+  border: none;
+  background: var(--mm-button-bg);
+  color: var(--mm-button-fg);
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.mm-toolbar button:hover:not(:disabled) {
+  background: var(--mm-button-hover);
+}
+
+.mm-toolbar button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mm-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--mm-panel-border);
+  margin: 0 2px;
+}
+
+.mm-help {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  max-height: calc(100% - 32px);
+  overflow: auto;
+  padding: 8px 14px;
+  background: var(--mm-panel-bg);
+  border: 1px solid var(--mm-panel-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 20;
+}
+
+.mm-help h3 {
+  margin: 4px 0 8px;
+}
+
+.mm-help td {
+  padding: 2px 8px 2px 0;
+  vertical-align: top;
+}
+
+.mm-help td:first-child {
+  white-space: nowrap;
+  font-family: var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-textPreformat-foreground, inherit);
+}
+
+.mm-ghost {
+  position: fixed;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: var(--mm-accent);
+  color: #fff;
+  opacity: 0.85;
+  z-index: 30;
+  white-space: nowrap;
+}
+
+.mm-status {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: var(--mm-panel-bg);
+  border: 1px solid var(--mm-panel-border);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.mm-status.show {
+  opacity: 1;
+}

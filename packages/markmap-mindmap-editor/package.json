@@ -1,0 +1,110 @@
+{
+  "name": "markmap-mindmap-editor",
+  "displayName": "Markmap Mindmap Editor",
+  "description": "Edit Markdown as a mindmap with XMind-style keyboard shortcuts (Enter / Tab / F2 / drag & drop...)",
+  "version": "0.1.0",
+  "private": true,
+  "publisher": "keizman",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/keizman/markmap-editor.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "markmap",
+    "mindmap",
+    "xmind",
+    "markdown"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "markmapMindmapEditor.editor",
+        "displayName": "Markmap Mindmap Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.mm.md"
+          },
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "markmapMindmapEditor.open",
+        "title": "Open as Editable Mindmap",
+        "category": "Markmap",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "markmapMindmapEditor.openToSide",
+        "title": "Open Editable Mindmap to the Side",
+        "category": "Markmap",
+        "icon": "$(type-hierarchy-sub)"
+      },
+      {
+        "command": "markmapMindmapEditor.openText",
+        "title": "Open Markdown Source",
+        "category": "Markmap",
+        "icon": "$(go-to-file)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "markmapMindmapEditor.open",
+          "when": "resourceLangId == markdown && activeEditor == workbench.editors.files.textFileEditor",
+          "group": "navigation"
+        },
+        {
+          "command": "markmapMindmapEditor.openText",
+          "when": "activeCustomEditorId == markmapMindmapEditor.editor",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "markmapMindmapEditor.open",
+          "when": "resourceLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "markmapMindmapEditor.openText",
+          "when": "activeCustomEditorId == markmapMindmapEditor.editor"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "del-cli dist",
+    "build:types": "tsc --noEmit",
+    "build:js": "node build.mjs",
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "package": "node build.mjs && vsce package --no-dependencies --allow-missing-repository --skip-license -o markmap-mindmap-editor.vsix"
+  },
+  "devDependencies": {
+    "@types/d3": "^7.4.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "d3": "^7.8.5",
+    "esbuild": "^0.25.5",
+    "markmap-common": "workspace:*",
+    "markmap-lib": "workspace:*",
+    "markmap-view": "workspace:*"
+  }
+}
