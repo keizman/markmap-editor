@@ -4,6 +4,7 @@ import { Transformer } from 'markmap-lib';
 import { Markmap, deriveOptions, simpleHash } from 'markmap-view';
 import {
   DropPosition,
+  MARKERS,
   MDoc,
   MNode,
   addChild,
@@ -23,6 +24,8 @@ import {
   remove,
   removeKeepChildren,
   serialize,
+  setMarker,
+  splitMarker,
   subtreeToMarkdown,
   walk,
 } from '../model';
@@ -57,6 +60,14 @@ const host: Host =
 /* DOM                                                                       */
 /* ------------------------------------------------------------------------ */
 
+const MARK_NAMES = ['Red', 'Yellow', 'Green'];
+
+const markButtons = (attr: string, title: (i: number) => string) =>
+  MARKERS.map(
+    (m, i) => `<button ${attr}="${attr === 'data-cmd' ? `mark${i + 1}` : m}"
+      title="${title(i)}">${m}</button>`,
+  ).join('');
+
 const app = document.getElementById('app') || document.body;
 app.innerHTML = `
 <svg class="mm-svg"></svg>
@@ -77,6 +88,21 @@ app.innerHTML = `
   <button data-cmd="openText" title="Open the Markdown source beside">Markdown</button>
   <button data-cmd="help" title="Keyboard shortcuts (F1 / ?)">?</button>
 </div>
+<div class="mm-side">
+  <div class="mm-row">
+    <span class="mm-label">Mark</span>
+    ${markButtons('data-cmd', (i) => `${MARK_NAMES[i]} marker (Ctrl+${i + 1}), click again to remove`)}
+    <button data-cmd="markClear" title="Remove marker">⊘</button>
+  </div>
+  <div class="mm-row mm-search">
+    <input class="mm-search-input" type="text" placeholder="Search (Ctrl+F)" spellcheck="false">
+    ${markButtons('data-find', (i) => `Find ${MARK_NAMES[i].toLowerCase()} markers`)}
+    <span class="mm-search-count"></span>
+    <button data-cmd="searchPrev" title="Previous match (Shift+Enter / Shift+F3)">↑</button>
+    <button data-cmd="searchNext" title="Next match (Enter / F3)">↓</button>
+  </div>
+</div>
+<div class="mm-banner" hidden>Showing one branch only · <a href="#">Show all</a> (Esc / Ctrl+;)</div>
 <div class="mm-help" hidden>
   <h3>Keyboard shortcuts</h3>
   <table>
@@ -87,17 +113,25 @@ app.innerHTML = `
     <tr><td>F2 / Space / double click / just type</td><td>Edit text</td></tr>
     <tr><td>Enter / Esc (while editing)</td><td>Finish / cancel editing</td></tr>
     <tr><td>Tab (while editing)</td><td>Finish and add child</td></tr>
-    <tr><td>Delete / Backspace</td><td>Delete node with its children</td></tr>
-    <tr><td>Ctrl+Delete</td><td>Delete node, keep its children</td></tr>
+    <tr><td>Delete / Backspace</td><td>Delete topic with its children</td></tr>
+    <tr><td>Ctrl+Delete / Ctrl+Backspace</td><td>Delete single topic (keep its children)</td></tr>
     <tr><td>Arrow keys</td><td>Select parent / child / sibling</td></tr>
     <tr><td>Home</td><td>Select root</td></tr>
+    <tr><td>Ctrl/Shift+click, drag on blank area</td><td>Multi-select (box select)</td></tr>
+    <tr><td>Ctrl+A</td><td>Select all</td></tr>
     <tr><td>Alt+↑ / Alt+↓</td><td>Move up / down</td></tr>
     <tr><td>Alt+→ / Shift+Tab, Alt+←</td><td>Indent / outdent</td></tr>
-    <tr><td>Drag a node</td><td>Drop on a node: child; on its top/bottom edge: sibling</td></tr>
-    <tr><td>Ctrl+/</td><td>Collapse / expand node</td></tr>
-    <tr><td>Ctrl+Shift+/</td><td>Collapse / expand node recursively</td></tr>
+    <tr><td>Drag topics</td><td>Drop on a topic: child; on its top/bottom edge: sibling</td></tr>
+    <tr><td>Right drag / wheel</td><td>Pan / zoom</td></tr>
+    <tr><td>Right click / Shift+F10</td><td>Context menu</td></tr>
+    <tr><td>Ctrl+/</td><td>Fold / unfold subtopics</td></tr>
+    <tr><td>Ctrl+Alt+/</td><td>Fold / unfold all sub-branches</td></tr>
+    <tr><td>Ctrl+Shift+/</td><td>Fold / unfold topic recursively</td></tr>
+    <tr><td>Ctrl+;</td><td>Show branch only / show all</td></tr>
     <tr><td>Alt+0</td><td>Expand all</td></tr>
     <tr><td>Alt+1 … Alt+9</td><td>Show N levels</td></tr>
+    <tr><td>Ctrl+1 / 2 / 3</td><td>Toggle 🔴 / 🟡 / 🟢 marker</td></tr>
+    <tr><td>Ctrl+F, F3 / Shift+F3</td><td>Search, next / previous match</td></tr>
     <tr><td>Ctrl+C / Ctrl+X / Ctrl+V</td><td>Copy / cut / paste (as child) — Markdown list text</td></tr>
     <tr><td>Ctrl+D</td><td>Duplicate</td></tr>
     <tr><td>Ctrl+Z / Ctrl+Y</td><td>Undo / redo (VS Code)</td></tr>
@@ -106,6 +140,8 @@ app.innerHTML = `
   </table>
   <p>Click anywhere to close.</p>
 </div>
+<div class="mm-menu" hidden></div>
+<div class="mm-marquee" hidden></div>
 <textarea class="mm-input" spellcheck="false" autocomplete="off"></textarea>
 <div class="mm-status"></div>
 `;
@@ -114,17 +150,29 @@ const svgEl = app.querySelector<SVGSVGElement>('.mm-svg')!;
 const input = app.querySelector<HTMLTextAreaElement>('.mm-input')!;
 const helpEl = app.querySelector<HTMLDivElement>('.mm-help')!;
 const statusEl = app.querySelector<HTMLDivElement>('.mm-status')!;
+const menuEl = app.querySelector<HTMLDivElement>('.mm-menu')!;
+const marqueeEl = app.querySelector<HTMLDivElement>('.mm-marquee')!;
+const bannerEl = app.querySelector<HTMLDivElement>('.mm-banner')!;
+const searchEl = app.querySelector<HTMLDivElement>('.mm-search')!;
+const searchInput = app.querySelector<HTMLInputElement>('.mm-search-input')!;
+const searchCount = app.querySelector<HTMLSpanElement>('.mm-search-count')!;
 
 const transformer = new Transformer();
 const mm = Markmap.create(svgEl, { duration: 300 });
 const baseOptions = { ...mm.options };
 
+// Pan with the right mouse button (left button selects), zoom with the wheel.
+mm.zoom.filter((event: any) => {
+  if (event.type === 'wheel')
+    return mm.options.scrollForPan ? event.ctrlKey : true;
+  if (event.type === 'dblclick') return false;
+  if (event.type.startsWith('touch')) return true;
+  return event.type === 'mousedown' && event.button === 2;
+});
+
 const layer = mm.g.insert('g', ':first-child').attr('class', 'mm-layer');
-const selRect = layer
-  .append('rect')
-  .attr('class', 'mm-selection')
-  .attr('rx', 4)
-  .style('display', 'none');
+const matchLayer = layer.append('g');
+const selLayer = layer.append('g');
 const dropRect = layer
   .append('rect')
   .attr('class', 'mm-drop')
@@ -139,10 +187,19 @@ let doc: MDoc = parse('');
 let text = '';
 let loaded = false;
 let firstRender = true;
+/** Primary selection: target of keyboard commands. */
 let selected: MNode | null = null;
+/** Additional selected node ids (multi-selection). */
+let extra = new Set<number>();
 /** Model id -> rendered markmap node */
 let rendered = new Map<number, INode>();
 let rootMid = 0;
+/** "Show branch only": model id of the branch shown as the root. */
+let focusId: number | null = null;
+
+let query = '';
+let matches: MNode[] = [];
+let matchIndex = -1;
 
 interface EditState {
   node: MNode;
@@ -151,6 +208,8 @@ interface EditState {
   multiline: boolean;
   /** Node to select when a new node is cancelled. */
   fallback: MNode | null;
+  /** Checkbox / marker kept when the text is replaced by typing. */
+  keepPrefix: string;
 }
 let editing: EditState | null = null;
 let composing = false;
@@ -230,6 +289,20 @@ async function render() {
   rendered = nextRendered;
   rootMid = (root as INode).payload?.mid as number;
 
+  let dataRoot = root as INode;
+  if (focusId != null) {
+    const focusNode = findById(doc, focusId);
+    const focusINode = rendered.get(focusId);
+    if (focusNode && focusINode && focusId !== rootMid) {
+      focusNode.fold = false;
+      focusINode.payload = { ...focusINode.payload, fold: 0 };
+      dataRoot = focusINode;
+    } else {
+      focusId = null;
+    }
+  }
+  bannerEl.hidden = focusId == null;
+
   mm.options = {
     ...baseOptions,
     ...derived,
@@ -238,7 +311,7 @@ async function render() {
     duration: derived.duration ?? 300,
   };
   mm.setOptions();
-  mm.state.data = root as INode;
+  mm.state.data = dataRoot;
   mm.updateStyle();
   await mm.renderData();
   if (seq !== renderSeq) return;
@@ -247,6 +320,10 @@ async function render() {
     await mm.fit();
   }
   if (selected && !findById(doc, selected.id)) selected = null;
+  extra.forEach((mid) => {
+    if (!findById(doc, mid)) extra.delete(mid);
+  });
+  if (query) computeMatches();
   updateSelection();
 }
 
@@ -254,34 +331,89 @@ function getINode(node: MNode | null | undefined) {
   return node ? rendered.get(node.id) : undefined;
 }
 
-function isShown(node: MNode) {
-  if (!rendered.has(node.id)) return false;
-  for (let p = node.parent; p && p.id !== rootMid; p = p.parent) {
-    if (p.fold) return false;
-  }
-  return true;
-}
-
 function getRootNode() {
   return findById(doc, rootMid) || doc.root;
 }
 
-function updateSelection() {
-  const inode = getINode(selected);
-  if (!inode || !selected || !isShown(selected)) {
-    selRect.style('display', 'none');
-  } else {
-    const { x, y, width, height } = inode.state.rect;
-    const pad = 4;
-    selRect
-      .style('display', null)
-      .transition()
-      .duration(mm.options.duration)
-      .attr('x', x - pad)
-      .attr('y', y - pad)
-      .attr('width', width + pad * 2)
-      .attr('height', height + pad * 2);
+/** The node displayed as the root (differs in "show branch only" mode). */
+function viewRoot() {
+  return (focusId != null && findById(doc, focusId)) || getRootNode();
+}
+
+function isRootNode(node: MNode) {
+  return node.kind === 'root' || node.id === rootMid;
+}
+
+function isShown(node: MNode) {
+  if (!rendered.has(node.id)) return false;
+  const top = viewRoot();
+  if (focusId != null && !isAncestor(top, node)) return false;
+  if (node === top) return true;
+  for (let p = node.parent; p; p = p.parent) {
+    if (p.fold) return false;
+    if (p === top) break;
   }
+  return true;
+}
+
+interface RectItem {
+  id: number;
+  r: { x: number; y: number; width: number; height: number };
+  cls: string;
+}
+
+function drawRects(
+  group: any,
+  items: RectItem[],
+  pad: number,
+  animate: boolean,
+) {
+  const place = (s: any) =>
+    s
+      .attr('x', (d: RectItem) => d.r.x - pad)
+      .attr('y', (d: RectItem) => d.r.y - pad)
+      .attr('width', (d: RectItem) => d.r.width + pad * 2)
+      .attr('height', (d: RectItem) => d.r.height + pad * 2);
+  const sel = group.selectAll('rect').data(items, (d: RectItem) => d.id);
+  sel.exit().remove();
+  sel
+    .enter()
+    .append('rect')
+    .attr('rx', 4)
+    .attr('class', (d: RectItem) => d.cls)
+    .call(place);
+  sel.attr('class', (d: RectItem) => d.cls);
+  if (animate) {
+    sel.transition().duration(mm.options.duration).call(place);
+  } else {
+    sel.interrupt().call(place);
+  }
+}
+
+function updateSelection(animate = true) {
+  drawRects(
+    selLayer,
+    selectedNodes()
+      .filter(isShown)
+      .map((n) => ({
+        id: n.id,
+        r: getINode(n)!.state.rect,
+        cls: n === selected ? 'mm-selection primary' : 'mm-selection',
+      })),
+    4,
+    animate,
+  );
+  const current = matches[matchIndex];
+  drawRects(
+    matchLayer,
+    matches.filter(isShown).map((n) => ({
+      id: n.id,
+      r: getINode(n)!.state.rect,
+      cls: n === current ? 'mm-match current' : 'mm-match',
+    })),
+    7,
+    animate,
+  );
   positionInput();
   updateToolbar();
 }
@@ -350,12 +482,67 @@ transformer.hooks.retransform.tap(() => {
 /* Selection & navigation                                                    */
 /* ------------------------------------------------------------------------ */
 
+function selectedNodes(): MNode[] {
+  const list: MNode[] = [];
+  if (selected) list.push(selected);
+  if (extra.size) {
+    walk(doc.root, (n) => {
+      if (n !== selected && extra.has(n.id)) list.push(n);
+    });
+  }
+  return list;
+}
+
+function isSelected(node: MNode) {
+  return node === selected || extra.has(node.id);
+}
+
+/** Drop nodes whose ancestor is in the list, sort in document order. */
+function topLevel(nodes: MNode[]) {
+  const set = new Set(nodes);
+  const order = new Map<MNode, number>();
+  walk(doc.root, (n) => {
+    order.set(n, order.size);
+  });
+  return nodes
+    .filter((n) => {
+      for (let p = n.parent; p; p = p.parent) if (set.has(p)) return false;
+      return true;
+    })
+    .sort((a, b) => order.get(a)! - order.get(b)!);
+}
+
+function setSelection(
+  primary: MNode | null,
+  others: MNode[] = [],
+  animate = true,
+) {
+  selected = primary;
+  extra = new Set(others.filter((n) => n !== primary).map((n) => n.id));
+  updateSelection(animate);
+}
+
 function selectNode(node: MNode | null, reveal = true) {
-  selected = node;
-  updateSelection();
-  const inode = getINode(node);
-  if (reveal && inode) {
+  setSelection(node);
+  if (reveal) revealSelected();
+}
+
+function revealSelected() {
+  const inode = getINode(selected);
+  if (inode && selected && isShown(selected)) {
     mm.ensureVisible(inode, { left: 40, right: 40, top: 60, bottom: 40 });
+  }
+}
+
+function toggleSelect(node: MNode) {
+  if (node === selected) {
+    const rest = selectedNodes().slice(1);
+    if (rest.length) setSelection(rest[0], rest);
+  } else if (extra.has(node.id)) {
+    extra.delete(node.id);
+    updateSelection();
+  } else {
+    setSelection(node, selectedNodes());
   }
 }
 
@@ -369,22 +556,25 @@ function centerOf(node: MNode) {
 }
 
 function navigate(dir: 'up' | 'down' | 'left' | 'right') {
-  if (!selected || !rendered.has(selected.id)) {
-    selectNode(getRootNode());
+  if (!selected || !isShown(selected)) {
+    selectNode(viewRoot());
     return;
   }
   const cur = selected;
+  const top = viewRoot();
   if (dir === 'left') {
-    if (cur.id !== rootMid && cur.parent && rendered.has(cur.parent.id)) {
+    if (cur !== top && cur.parent && rendered.has(cur.parent.id)) {
       selectNode(cur.parent);
+    } else {
+      selectNode(cur);
     }
     return;
   }
   if (dir === 'right') {
     const children = shownChildren(cur);
-    if (!children.length) return;
+    if (!children.length) return selectNode(cur);
     if (cur.fold) {
-      setFold(cur, false);
+      setFold([cur], false);
     }
     const c = centerOf(cur);
     const best = children.reduce((a, b) =>
@@ -395,7 +585,7 @@ function navigate(dir: 'up' | 'down' | 'left' | 'right') {
   }
   // up / down: siblings first, then the geometrically nearest node.
   const delta = dir === 'up' ? -1 : 1;
-  if (cur.parent && cur.id !== rootMid) {
+  if (cur.parent && cur !== top && cur.id !== rootMid) {
     const siblings = shownChildren(cur.parent);
     const sib = siblings[siblings.indexOf(cur) + delta];
     if (sib) {
@@ -417,7 +607,7 @@ function navigate(dir: 'up' | 'down' | 'left' | 'right') {
       best = n;
     }
   });
-  if (best) selectNode(best);
+  selectNode(best || cur);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -438,42 +628,200 @@ async function refreshFolds() {
   updateSelection();
 }
 
-function setFold(node: MNode, fold: boolean, recursive = false) {
-  if (recursive) {
-    walk(node, (n) => {
-      n.fold = fold;
-    });
-  } else {
-    node.fold = fold;
-  }
+function hasShownChildren(node: MNode) {
+  return shownChildren(node).length > 0;
+}
+
+function setFold(nodes: MNode[], fold: boolean, recursive = false) {
+  nodes.forEach((node) => {
+    if (recursive) {
+      walk(node, (n) => {
+        n.fold = fold;
+      });
+    } else {
+      node.fold = fold;
+    }
+  });
   return refreshFolds();
 }
 
-function toggleFold(node: MNode, recursive = false) {
-  if (!shownChildren(node).length) return;
-  return setFold(node, !node.fold, recursive);
+/** Is any branch below `node` (not `node` itself) folded? */
+function hasFoldedSubBranch(node: MNode) {
+  let found = false;
+  node.children.forEach((c) =>
+    walk(c, (n) => {
+      if (found) return false;
+      if (n.fold && hasShownChildren(n)) found = true;
+    }),
+  );
+  return found;
+}
+
+function hasSubBranch(node: MNode) {
+  return node.children.some(hasShownChildren);
+}
+
+/** XMind "Fold All Sub-branches": keep the children shown, fold below them. */
+function toggleSubBranches(nodes: MNode[], primary: MNode) {
+  const unfold = hasFoldedSubBranch(primary);
+  nodes.forEach((node) => {
+    node.fold = false;
+    node.children.forEach((c) =>
+      walk(c, (n) => {
+        n.fold = unfold ? false : hasShownChildren(n);
+      }),
+    );
+  });
+  return refreshFolds();
 }
 
 function showLevels(level: number) {
-  const root = getRootNode();
+  const root = viewRoot();
   const visit = (n: MNode, depth: number) => {
     n.fold = level > 0 && depth >= level;
     n.children.forEach((c) => visit(c, depth + 1));
   };
   visit(root, 1);
+  const shown = selectedNodes().filter(isShown);
   if (selected && !isShown(selected)) {
     let s: MNode | null = selected;
     while (s && !isShown(s)) s = s.parent;
-    selected = s;
+    setSelection(s, shown, false);
+  } else {
+    setSelection(selected, shown, false);
   }
   return refreshFolds().then(() => mm.fit());
 }
 
 mm.handleClick = (e: MouseEvent, d: INode) => {
   const node = findById(doc, d.payload?.mid as number);
-  if (!node) return;
-  toggleFold(node, e.ctrlKey || e.metaKey);
+  if (!node || !hasShownChildren(node)) return;
+  setFold([node], !node.fold, e.ctrlKey || e.metaKey);
 };
+
+/* ------------------------------------------------------------------------ */
+/* Show branch only                                                          */
+/* ------------------------------------------------------------------------ */
+
+async function setFocus(id: number | null) {
+  focusId = id;
+  await render();
+  await mm.fit();
+}
+
+/** Select a node, unfolding and leaving "branch only" mode as needed. */
+async function revealNode(node: MNode) {
+  let needRender = false;
+  if (focusId != null && !isAncestor(viewRoot(), node)) {
+    focusId = null;
+    needRender = true;
+  }
+  let changed = false;
+  for (let p = node.parent; p; p = p.parent) {
+    if (p.fold) {
+      p.fold = false;
+      changed = true;
+    }
+  }
+  if (needRender) await render();
+  else if (changed) await refreshFolds();
+  selectNode(node);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Markers                                                                   */
+/* ------------------------------------------------------------------------ */
+
+async function applyMarker(marker: string | null) {
+  const targets = selectedNodes().filter(
+    (n) => n.kind !== 'root' && n.kind !== 'block',
+  );
+  if (!targets.length) return;
+  // Clicking the marker every target already has removes it.
+  const remove =
+    marker != null &&
+    targets.every((n) => splitMarker(n.text).marker === marker);
+  let changed = false;
+  targets.forEach((n) => {
+    const next = setMarker(n.text, remove ? null : marker);
+    if (next !== n.text) {
+      n.text = next;
+      changed = true;
+    }
+  });
+  if (changed) await commit();
+}
+
+/* ------------------------------------------------------------------------ */
+/* Search                                                                    */
+/* ------------------------------------------------------------------------ */
+
+function computeMatches() {
+  const q = query.toLowerCase();
+  const current = matches[matchIndex];
+  matches = [];
+  if (q) {
+    walk(doc.root, (n) => {
+      if (
+        n.kind !== 'root' &&
+        rendered.has(n.id) &&
+        n.text.toLowerCase().includes(q)
+      ) {
+        matches.push(n);
+      }
+    });
+  }
+  matchIndex = current ? matches.indexOf(current) : -1;
+  updateSearchCount();
+}
+
+function updateSearchCount() {
+  searchCount.textContent = query
+    ? `${matchIndex >= 0 ? matchIndex + 1 : 0}/${matches.length}`
+    : '';
+  searchEl.classList.toggle('no-match', !!query && !matches.length);
+}
+
+async function gotoMatch(delta: 1 | -1) {
+  if (!matches.length) return;
+  matchIndex =
+    matchIndex < 0
+      ? delta > 0
+        ? 0
+        : matches.length - 1
+      : (matchIndex + delta + matches.length) % matches.length;
+  updateSearchCount();
+  await revealNode(matches[matchIndex]);
+}
+
+function setQuery(value: string) {
+  query = value.trim();
+  matchIndex = -1;
+  computeMatches();
+  updateSelection(false);
+  if (matches.length) gotoMatch(1);
+}
+
+function clearSearch() {
+  searchInput.value = '';
+  setQuery('');
+}
+
+searchInput.addEventListener('input', () => setQuery(searchInput.value));
+searchInput.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (e.key === 'Enter' || e.key === 'F3') {
+    e.preventDefault();
+    gotoMatch(e.shiftKey ? -1 : 1);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    clearSearch();
+    focusInput();
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    searchInput.select();
+  }
+});
 
 /* ------------------------------------------------------------------------ */
 /* Editing                                                                   */
@@ -522,6 +870,8 @@ function autosize(minWidth = 0, minHeight = 0) {
 }
 
 mm.zoom.on('zoom.mmEditor', () => {
+  if (rightDown) rightDown.moved = true;
+  closeMenu();
   positionInput();
 });
 
@@ -533,6 +883,7 @@ function startEdit(
     showStatus('The root title comes from the frontmatter `title`.');
     return;
   }
+  closeMenu();
   const multiline = node.kind === 'block';
   editing = {
     node,
@@ -540,8 +891,9 @@ function startEdit(
     original: node.text,
     multiline,
     fallback: opts.fallback ?? null,
+    keepPrefix: opts.replace && !multiline ? splitMarker(node.text).prefix : '',
   };
-  selected = node;
+  setSelection(node, [], false);
   input.classList.add('editing');
   input.classList.toggle('multiline', multiline);
   if (!opts.replace) {
@@ -557,9 +909,13 @@ async function finishEdit(save = true, then?: 'child' | 'sibling') {
   const state = editing;
   if (!state) return;
   editing = null;
-  const value = state.multiline
+  let value = state.multiline
     ? input.value.replace(/\s+$/, '')
     : input.value.replace(/\s*\n\s*/g, ' ').trim();
+  // Typing over a node replaces its text but keeps its checkbox / marker.
+  if (value && state.keepPrefix && !splitMarker(value).prefix) {
+    value = state.keepPrefix + value;
+  }
   input.value = '';
   input.classList.remove('editing', 'multiline');
   input.style.width = '';
@@ -640,6 +996,96 @@ input.addEventListener('blur', () => {
 });
 
 /* ------------------------------------------------------------------------ */
+/* Clipboard                                                                 */
+/* ------------------------------------------------------------------------ */
+
+/** Fallback when the system clipboard is not accessible. */
+let internalClipboard = '';
+
+function selectionMarkdown() {
+  const nodes = topLevel(selectedNodes()).filter((n) => n.kind !== 'root');
+  return nodes.length ? subtreeToMarkdown(nodes) : '';
+}
+
+async function copyToClipboard() {
+  const md = selectionMarkdown();
+  if (!md) return false;
+  internalClipboard = md;
+  let ok = false;
+  try {
+    // Fires the `copy` event below, which writes the Markdown.
+    ok = document.execCommand('copy');
+  } catch {
+    // ignore
+  }
+  if (!ok) {
+    try {
+      await navigator.clipboard.writeText(md);
+    } catch {
+      // keep the internal clipboard only
+    }
+  }
+  return true;
+}
+
+async function pasteFromClipboard() {
+  try {
+    const data = await navigator.clipboard.readText();
+    if (data) {
+      pasteText(data);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+  let ok = false;
+  try {
+    // Fires the `paste` event below.
+    ok = document.execCommand('paste');
+  } catch {
+    // ignore
+  }
+  if (!ok && internalClipboard) pasteText(internalClipboard);
+}
+
+function pasteText(data: string) {
+  const nodes = parseFragment(data);
+  if (!nodes.length) return;
+  const parent = selected && selected.kind !== 'block' ? selected : viewRoot();
+  insertNodes(doc, parent, nodes);
+  extra = new Set(nodes.slice(1).map((n) => n.id));
+  structural(() => true, nodes[0]);
+}
+
+const clipboardTarget = () =>
+  !editing && document.activeElement !== searchInput;
+
+document.addEventListener('copy', (e) => {
+  if (!clipboardTarget()) return;
+  const md = selectionMarkdown();
+  if (!md) return;
+  internalClipboard = md;
+  e.clipboardData?.setData('text/plain', md);
+  e.preventDefault();
+});
+
+document.addEventListener('cut', (e) => {
+  if (!clipboardTarget()) return;
+  const md = selectionMarkdown();
+  if (!md) return;
+  internalClipboard = md;
+  e.clipboardData?.setData('text/plain', md);
+  e.preventDefault();
+  runCommand('delete');
+});
+
+document.addEventListener('paste', (e) => {
+  if (!clipboardTarget()) return;
+  e.preventDefault();
+  pasteText(e.clipboardData?.getData('text/plain') || '');
+});
+
+/* ------------------------------------------------------------------------ */
 /* Commands                                                                  */
 /* ------------------------------------------------------------------------ */
 
@@ -649,15 +1095,56 @@ async function structural(fn: () => boolean | void, keep = selected) {
   if (fn() === false) return;
   selected = keep;
   await commit();
-  selectNode(selected);
+  revealSelected();
+}
+
+/** Where the selection goes after `nodes` are deleted. */
+function nextAfterRemoval(nodes: MNode[]) {
+  const set = new Set(nodes);
+  const gone = (n: MNode) => {
+    for (let p: MNode | null = n; p; p = p.parent) if (set.has(p)) return true;
+    return false;
+  };
+  const base = selected && gone(selected) ? selected : nodes[0];
+  const parent = base.parent!;
+  const siblings = shownChildren(parent);
+  const i = siblings.indexOf(base);
+  const candidate = [
+    ...siblings.slice(i + 1),
+    ...siblings.slice(0, Math.max(i, 0)).reverse(),
+  ].find((s) => !gone(s));
+  if (candidate) return candidate;
+  let p: MNode | null = parent;
+  while (p && gone(p)) p = p.parent;
+  return p;
+}
+
+function moveMany(nodes: MNode[], target: MNode, position: DropPosition) {
+  let ok = false;
+  let ref = target;
+  nodes.forEach((n) => {
+    if (position === 'after') {
+      if (moveTo(doc, n, ref, 'after')) {
+        ok = true;
+        ref = n;
+      }
+    } else if (moveTo(doc, n, target, position)) {
+      ok = true;
+    }
+  });
+  return ok;
 }
 
 async function runCommand(cmd: string) {
+  closeMenu();
   const node = selected;
-  const isRoot = !node || node.id === rootMid || node.kind === 'root';
+  const top = viewRoot();
+  const isRoot = !node || isRootNode(node) || node === top;
+  /** Selected nodes that can be moved / deleted. */
+  const many = () => topLevel(selectedNodes()).filter((n) => !isRootNode(n));
   switch (cmd) {
     case 'addChild': {
-      const parent = node || getRootNode();
+      const parent = node || top;
       if (parent.kind === 'block') return;
       await createAndEdit(() => addChild(doc, parent), parent);
       break;
@@ -679,13 +1166,13 @@ async function runCommand(cmd: string) {
     }
     case 'delete':
     case 'deleteKeepChildren': {
-      if (!node || isRoot) return;
-      const parent = node.parent!;
-      const siblings = shownChildren(parent);
-      const i = siblings.indexOf(node);
-      const next = siblings[i + 1] || siblings[i - 1] || parent;
-      if (cmd === 'delete') remove(node);
-      else removeKeepChildren(node);
+      const nodes = many();
+      if (!nodes.length) return;
+      const next = nextAfterRemoval(nodes);
+      nodes.forEach((n) =>
+        cmd === 'delete' ? remove(n) : removeKeepChildren(n),
+      );
+      extra.clear();
       await structural(() => true, next);
       break;
     }
@@ -702,24 +1189,85 @@ async function runCommand(cmd: string) {
       break;
     case 'outdent':
       if (!node || isRoot || node.parent?.id === rootMid) return;
+      if (node.parent === top) return;
       await structural(() => outdent(doc, node));
       break;
     case 'duplicate': {
-      if (!node || isRoot) return;
-      const copy = cloneTree(node);
-      const parent = node.parent!;
-      insertNodes(doc, parent, [copy], parent.children.indexOf(node) + 1);
-      await structural(() => true, copy);
+      const nodes = many();
+      if (!nodes.length) return;
+      const copies = nodes.map((n) => {
+        const copy = cloneTree(n);
+        const parent = n.parent!;
+        insertNodes(doc, parent, [copy], parent.children.indexOf(n) + 1);
+        return copy;
+      });
+      extra = new Set(copies.slice(1).map((n) => n.id));
+      await structural(() => true, copies[0]);
       break;
     }
     case 'edit':
       if (node) startEdit(node);
       break;
     case 'toggle':
-      if (node) await toggleFold(node);
+    case 'toggleRecursive': {
+      if (!node) return;
+      const targets = selectedNodes().filter(hasShownChildren);
+      if (!targets.length) return;
+      const fold = !(hasShownChildren(node) ? node : targets[0]).fold;
+      await setFold(targets, fold, cmd === 'toggleRecursive');
       break;
-    case 'toggleRecursive':
-      if (node) await setFold(node, !node.fold, true);
+    }
+    case 'toggleSubBranches': {
+      if (!node) return;
+      const targets = selectedNodes().filter(hasSubBranch);
+      if (!targets.length) return;
+      await toggleSubBranches(targets, hasSubBranch(node) ? node : targets[0]);
+      break;
+    }
+    case 'showBranch':
+      if (focusId != null && (!node || node.id === focusId || isRootNode(node)))
+        await setFocus(null);
+      else if (node && !isRootNode(node)) await setFocus(node.id);
+      break;
+    case 'showAll':
+      if (focusId != null) await setFocus(null);
+      break;
+    case 'mark1':
+    case 'mark2':
+    case 'mark3':
+      await applyMarker(MARKERS[+cmd.slice(4) - 1]);
+      break;
+    case 'markClear':
+      await applyMarker(null);
+      break;
+    case 'cut':
+      if (many().length && (await copyToClipboard())) {
+        await runCommand('delete');
+      }
+      break;
+    case 'copy':
+      await copyToClipboard();
+      break;
+    case 'paste':
+      await pasteFromClipboard();
+      break;
+    case 'selectAll': {
+      const all: MNode[] = [];
+      walk(top, (n) => {
+        if (isShown(n)) all.push(n);
+      });
+      setSelection(node && isShown(node) ? node : top, all);
+      break;
+    }
+    case 'search':
+      searchInput.focus();
+      searchInput.select();
+      return;
+    case 'searchNext':
+      await gotoMatch(1);
+      break;
+    case 'searchPrev':
+      await gotoMatch(-1);
       break;
     case 'expandAll':
       await showLevels(0);
@@ -749,23 +1297,182 @@ async function runCommand(cmd: string) {
       helpEl.hidden = !helpEl.hidden;
       break;
   }
-  if (!editing) focusInput();
+  if (!editing && document.activeElement !== searchInput) focusInput();
 }
 
-app.querySelector('.mm-toolbar')!.addEventListener('mousedown', (e) => {
-  // Keep focus in the editor input.
-  e.preventDefault();
-});
-app.querySelector('.mm-toolbar')!.addEventListener('click', (e) => {
-  const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
-    'button[data-cmd]',
-  );
-  if (btn) runCommand(btn.dataset.cmd!);
-});
+for (const panel of app.querySelectorAll('.mm-toolbar, .mm-side')) {
+  panel.addEventListener('mousedown', (e) => {
+    // Keep focus where it is (editor input or search box).
+    if ((e.target as Element).closest('button')) e.preventDefault();
+  });
+  panel.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>(
+      'button[data-cmd],button[data-find]',
+    );
+    if (!btn) return;
+    if (btn.dataset.find) {
+      searchInput.value = btn.dataset.find;
+      setQuery(searchInput.value);
+      return;
+    }
+    runCommand(btn.dataset.cmd!);
+  });
+}
 helpEl.addEventListener('click', () => {
   helpEl.hidden = true;
   focusInput();
 });
+bannerEl.addEventListener('click', (e) => {
+  e.preventDefault();
+  runCommand('showAll');
+});
+
+/* ------------------------------------------------------------------------ */
+/* Context menu                                                              */
+/* ------------------------------------------------------------------------ */
+
+type MenuEntry =
+  | { label: string; key?: string; cmd: string; disabled?: boolean }
+  | '-'
+  | 'markers';
+
+function nodeMenu(): MenuEntry[] {
+  const node = selected!;
+  const root = isRootNode(node) || node === viewRoot();
+  const movable = topLevel(selectedNodes()).some((n) => !isRootNode(n));
+  return [
+    { label: 'Add Topic', key: 'Enter', cmd: 'addSibling' },
+    {
+      label: 'Add Subtopic',
+      key: 'Tab',
+      cmd: 'addChild',
+      disabled: node.kind === 'block',
+    },
+    {
+      label: 'Insert Parent Topic',
+      key: 'Ctrl+Enter',
+      cmd: 'insertParent',
+      disabled: root,
+    },
+    {
+      label: 'Edit Topic',
+      key: 'F2',
+      cmd: 'edit',
+      disabled: node.kind === 'root',
+    },
+    '-',
+    { label: 'Cut', key: 'Ctrl+X', cmd: 'cut', disabled: !movable },
+    { label: 'Copy', key: 'Ctrl+C', cmd: 'copy' },
+    {
+      label: 'Paste',
+      key: 'Ctrl+V',
+      cmd: 'paste',
+      disabled: node.kind === 'block',
+    },
+    { label: 'Duplicate', key: 'Ctrl+D', cmd: 'duplicate', disabled: !movable },
+    { label: 'Delete', key: 'Backspace', cmd: 'delete', disabled: !movable },
+    {
+      label: 'Delete Single Topic',
+      key: 'Ctrl+Backspace',
+      cmd: 'deleteKeepChildren',
+      disabled: !movable,
+    },
+    '-',
+    'markers',
+    '-',
+    {
+      label: node.fold ? 'Unfold Subtopic' : 'Fold Subtopic',
+      key: 'Ctrl+/',
+      cmd: 'toggle',
+      disabled: !hasShownChildren(node),
+    },
+    {
+      label: hasFoldedSubBranch(node)
+        ? 'Unfold All Sub-branches'
+        : 'Fold All Sub-branches',
+      key: 'Ctrl+Alt+/',
+      cmd: 'toggleSubBranches',
+      disabled: !hasSubBranch(node),
+    },
+    '-',
+    {
+      label: focusId === node.id ? 'Show All Branches' : 'Show Branch Only',
+      key: 'Ctrl+;',
+      cmd: 'showBranch',
+      disabled: isRootNode(node) && focusId == null,
+    },
+  ];
+}
+
+function canvasMenu(): MenuEntry[] {
+  return [
+    { label: 'Expand All', key: 'Alt+0', cmd: 'expandAll' },
+    { label: 'Collapse All', key: 'Alt+1', cmd: 'collapseAll' },
+    '-',
+    { label: 'Select All', key: 'Ctrl+A', cmd: 'selectAll' },
+    { label: 'Search', key: 'Ctrl+F', cmd: 'search' },
+    { label: 'Fit Map', key: 'Ctrl+0', cmd: 'fit' },
+    ...(focusId != null
+      ? [{ label: 'Show All Branches', key: 'Ctrl+;', cmd: 'showAll' }]
+      : []),
+  ];
+}
+
+const escapeHtml = (s: string) =>
+  s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function showMenu(x: number, y: number, entries: MenuEntry[]) {
+  menuEl.innerHTML = entries
+    .map((entry) => {
+      if (entry === '-') return '<div class="mm-menu-sep"></div>';
+      if (entry === 'markers') {
+        return `<div class="mm-menu-markers"><span>Marker</span>${markButtons(
+          'data-cmd',
+          (i) => `${MARK_NAMES[i]} (Ctrl+${i + 1})`,
+        )}<button data-cmd="markClear" title="Remove marker">⊘</button></div>`;
+      }
+      return `<div class="mm-menu-item${entry.disabled ? ' disabled' : ''}" data-cmd="${
+        entry.cmd
+      }"><span>${escapeHtml(entry.label)}</span><kbd>${escapeHtml(
+        entry.key || '',
+      )}</kbd></div>`;
+    })
+    .join('');
+  menuEl.hidden = false;
+  const { width, height } = menuEl.getBoundingClientRect();
+  menuEl.style.left = `${Math.max(0, Math.min(x, window.innerWidth - width - 4))}px`;
+  menuEl.style.top = `${Math.max(0, Math.min(y, window.innerHeight - height - 4))}px`;
+}
+
+function closeMenu() {
+  menuEl.hidden = true;
+}
+
+function openMenuAtSelection() {
+  if (!selected || !isShown(selected)) {
+    const r = svgEl.getBoundingClientRect();
+    showMenu(r.left + 40, r.top + 60, canvasMenu());
+    return;
+  }
+  const r = clientRect(selected);
+  showMenu(r.left, r.bottom + 4, nodeMenu());
+}
+
+menuEl.addEventListener('mousedown', (e) => e.preventDefault());
+menuEl.addEventListener('contextmenu', (e) => e.preventDefault());
+menuEl.addEventListener('click', (e) => {
+  const item = (e.target as HTMLElement).closest<HTMLElement>('[data-cmd]');
+  if (!item || item.classList.contains('disabled')) return;
+  runCommand(item.dataset.cmd!);
+});
+window.addEventListener(
+  'mousedown',
+  (e) => {
+    if (!menuEl.contains(e.target as Node)) closeMenu();
+  },
+  true,
+);
+window.addEventListener('blur', closeMenu);
 
 /* ------------------------------------------------------------------------ */
 /* Keyboard                                                                  */
@@ -792,6 +1499,14 @@ function handleEditKey(e: KeyboardEvent) {
 function handleCommandKey(e: KeyboardEvent) {
   const ctrl = e.ctrlKey || e.metaKey;
   const { key, code, shiftKey: shift, altKey: alt } = e;
+  const handled = () => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  if (!menuEl.hidden) {
+    closeMenu();
+    if (key === 'Escape') return handled();
+  }
   let cmd: string | undefined;
   if (key === 'Enter' && ctrl) cmd = 'insertParent';
   else if (key === 'Enter') cmd = shift ? 'addSiblingBefore' : 'addSibling';
@@ -806,35 +1521,42 @@ function handleCommandKey(e: KeyboardEvent) {
   else if (alt && key === 'ArrowRight') cmd = 'indent';
   else if (alt && key === 'ArrowLeft') cmd = 'outdent';
   else if (key.startsWith('Arrow') && !ctrl) {
-    e.preventDefault();
-    e.stopPropagation();
+    handled();
     navigate(key.slice(5).toLowerCase() as 'up');
     return;
   } else if (key === 'Home') {
-    e.preventDefault();
-    e.stopPropagation();
-    selectNode(getRootNode());
+    handled();
+    selectNode(viewRoot());
     return;
   } else if (key === 'Escape') {
-    e.preventDefault();
-    e.stopPropagation();
-    helpEl.hidden = true;
+    handled();
+    if (!helpEl.hidden) helpEl.hidden = true;
+    else if (focusId != null) runCommand('showAll');
+    else if (extra.size) selectNode(selected, false);
+    else if (query) clearSearch();
     return;
-  } else if (ctrl && code === 'Slash')
-    cmd = shift ? 'toggleRecursive' : 'toggle';
+  } else if (key === 'ContextMenu' || (shift && key === 'F10')) {
+    handled();
+    openMenuAtSelection();
+    return;
+  } else if (ctrl && alt && code === 'Slash') cmd = 'toggleSubBranches';
+  else if (ctrl && code === 'Slash') cmd = shift ? 'toggleRecursive' : 'toggle';
+  else if (ctrl && code === 'Semicolon') cmd = 'showBranch';
+  else if (ctrl && !alt && /^Digit[1-3]$/.test(code)) cmd = `mark${code[5]}`;
   else if (alt && !ctrl && /^Digit\d$/.test(code)) {
-    e.preventDefault();
-    e.stopPropagation();
+    handled();
     showLevels(+code.slice(5));
     return;
   } else if (ctrl && (key === '=' || key === '+')) cmd = 'zoomIn';
   else if (ctrl && key === '-') cmd = 'zoomOut';
   else if (ctrl && key === '0') cmd = 'fit';
   else if (ctrl && key.toLowerCase() === 'd') cmd = 'duplicate';
+  else if (ctrl && key.toLowerCase() === 'f') cmd = 'search';
+  else if (ctrl && key.toLowerCase() === 'a') cmd = 'selectAll';
+  else if (key === 'F3') cmd = shift ? 'searchPrev' : 'searchNext';
   else if (key === 'F1' || (key === '?' && !ctrl)) cmd = 'help';
   if (!cmd) return;
-  e.preventDefault();
-  e.stopPropagation();
+  handled();
   runCommand(cmd);
 }
 
@@ -847,44 +1569,72 @@ input.addEventListener('keydown', (e) => {
   else handleCommandKey(e);
 });
 
+input.addEventListener('contextmenu', (e) => {
+  if (editing) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openMenuAtSelection();
+});
+
 /* ------------------------------------------------------------------------ */
-/* Clipboard                                                                 */
+/* Mouse: select, box select, edit, links, drag & drop, pan                  */
 /* ------------------------------------------------------------------------ */
 
-function copySelected(e: ClipboardEvent) {
-  if (!selected || selected.kind === 'root') return false;
-  e.clipboardData?.setData('text/plain', subtreeToMarkdown([selected]));
-  e.preventDefault();
-  return true;
+function toMap(clientX: number, clientY: number) {
+  const s = svgEl.getBoundingClientRect();
+  const t = zoomTransform(svgEl);
+  return {
+    x: (clientX - s.left - t.x) / t.k,
+    y: (clientY - s.top - t.y) / t.k,
+  };
 }
 
-document.addEventListener('copy', (e) => {
-  if (editing) return;
-  copySelected(e);
-});
+function clientRect(node: MNode) {
+  const r = getINode(node)!.state.rect;
+  const s = svgEl.getBoundingClientRect();
+  const t = zoomTransform(svgEl);
+  const left = s.left + t.x + r.x * t.k;
+  const top = s.top + t.y + r.y * t.k;
+  return {
+    left,
+    top,
+    right: left + r.width * t.k,
+    bottom: top + r.height * t.k,
+  };
+}
 
-document.addEventListener('cut', (e) => {
-  if (editing) return;
-  if (copySelected(e) && selected && selected.id !== rootMid) {
-    runCommand('delete');
-  }
-});
-
-document.addEventListener('paste', (e) => {
-  if (editing) return;
-  e.preventDefault();
-  const data = e.clipboardData?.getData('text/plain') || '';
-  const nodes = parseFragment(data);
-  if (!nodes.length) return;
-  const parent =
-    selected && selected.kind !== 'block' ? selected : getRootNode();
-  insertNodes(doc, parent, nodes);
-  structural(() => true, nodes[0]);
-});
-
-/* ------------------------------------------------------------------------ */
-/* Mouse: select, edit, links, drag & drop                                   */
-/* ------------------------------------------------------------------------ */
+/**
+ * Find the node at a point. Each node owns a generous area around it:
+ * the link gap on its left, a minimum width on its right and half of the
+ * vertical spacing, so short topics are easy to hit. The closest wins.
+ */
+function pickNode(
+  clientX: number,
+  clientY: number,
+  exclude?: (n: MNode) => boolean,
+): MNode | null {
+  const { x, y } = toMap(clientX, clientY);
+  const { spacingHorizontal, spacingVertical } = mm.options;
+  let best: MNode | null = null;
+  let bestScore = Infinity;
+  walk(doc.root, (n) => {
+    if (!isShown(n) || exclude?.(n)) return;
+    const r = getINode(n)!.state.rect;
+    const left = r.x - spacingHorizontal * 0.6;
+    const right = r.x + Math.max(r.width, 80) + 8;
+    const top = r.y - spacingVertical / 2 - 2;
+    const bottom = r.y + r.height + spacingVertical / 2 + 2;
+    if (x < left || x > right || y < top || y > bottom) return;
+    const dx = x < r.x ? r.x - x : Math.max(0, x - r.x - r.width);
+    const dy = y < r.y ? r.y - y : Math.max(0, y - r.y - r.height);
+    const score = dx + dy * 3;
+    if (score < bestScore) {
+      bestScore = score;
+      best = n;
+    }
+  });
+  return best;
+}
 
 function nodeFromEvent(e: Event): MNode | null {
   const g = (e.target as Element).closest?.('g.markmap-node') as
@@ -904,7 +1654,16 @@ function nodeFromEvent(e: Event): MNode | null {
   return null;
 }
 
+function nodeAt(e: MouseEvent) {
+  return nodeFromEvent(e) || pickNode(e.clientX, e.clientY);
+}
+
 let suppressClick = false;
+
+function suppressNextClick() {
+  suppressClick = true;
+  setTimeout(() => (suppressClick = false), 0);
+}
 
 svgEl.addEventListener(
   'click',
@@ -920,14 +1679,8 @@ svgEl.addEventListener(
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
         host.postMessage({ type: 'openLink', href: link.getAttribute('href') });
-        return;
       }
     }
-    if (editing) return;
-    const node = nodeFromEvent(e);
-    if ((e.target as Element).closest('circle')) return;
-    selectNode(node, false);
-    focusInput();
   },
   true,
 );
@@ -935,7 +1688,7 @@ svgEl.addEventListener(
 svgEl.addEventListener(
   'dblclick',
   (e) => {
-    const node = nodeFromEvent(e);
+    const node = nodeAt(e);
     if (!node) return;
     e.preventDefault();
     e.stopPropagation();
@@ -945,72 +1698,182 @@ svgEl.addEventListener(
 );
 
 interface DragState {
-  node: MNode;
+  nodes: MNode[];
+  /** The node under the mouse. */
+  anchor: MNode;
   x: number;
   y: number;
   active: boolean;
+  /** Clicking a node of a multi-selection selects only that node. */
+  collapse: boolean;
   ghost?: HTMLDivElement;
   target?: { node: MNode; position: DropPosition };
 }
 let drag: DragState | null = null;
 
+interface MarqueeState {
+  x: number;
+  y: number;
+  active: boolean;
+  additive: boolean;
+  base: MNode[];
+  basePrimary: MNode | null;
+}
+let marquee: MarqueeState | null = null;
+
+let rightDown: { x: number; y: number; moved: boolean } | null = null;
+
 svgEl.addEventListener(
   'mousedown',
   (e) => {
-    if (e.button !== 0 || editing) return;
-    if ((e.target as Element).closest('circle')) return;
-    const node = nodeFromEvent(e);
-    if (!node || node.id === rootMid || node.kind === 'root') return;
-    drag = { node, x: e.clientX, y: e.clientY, active: false };
+    closeMenu();
+    if (e.button === 2) {
+      // Right button pans the map (d3-zoom); a click opens the menu.
+      rightDown = { x: e.clientX, y: e.clientY, moved: false };
+      return;
+    }
+    if (e.button !== 0) return;
+    if ((e.target as Element).closest('circle')) return; // fold toggle
+    e.preventDefault();
+    if (editing) finishEdit(true);
+    else focusInput();
+    const ctrl = e.ctrlKey || e.metaKey;
+    const link = (e.target as Element).closest('a');
+    const node = nodeAt(e);
+    if (!node) {
+      marquee = {
+        x: e.clientX,
+        y: e.clientY,
+        active: false,
+        additive: ctrl || e.shiftKey,
+        base: selectedNodes(),
+        basePrimary: selected,
+      };
+      return;
+    }
+    if (ctrl && link) return; // Ctrl+click opens the link
+    if (ctrl || e.shiftKey) {
+      toggleSelect(node);
+      return;
+    }
+    const inSelection = isSelected(node) && extra.size > 0;
+    if (!inSelection) selectNode(node, false);
+    const nodes = topLevel(inSelection ? selectedNodes() : [node]).filter(
+      (n) => !isRootNode(n) && n !== viewRoot(),
+    );
+    if (!nodes.length && !inSelection) return;
+    drag = {
+      nodes,
+      anchor: node,
+      x: e.clientX,
+      y: e.clientY,
+      active: false,
+      collapse: inSelection,
+    };
   },
   true,
 );
 
-function hitTest(clientX: number, clientY: number, exclude: MNode) {
-  const svgRect = svgEl.getBoundingClientRect();
-  const t = zoomTransform(svgEl);
-  const x = (clientX - svgRect.left - t.x) / t.k;
-  const y = (clientY - svgRect.top - t.y) / t.k;
-  let hit: { node: MNode; position: DropPosition } | undefined;
-  walk(doc.root, (n) => {
-    if (hit || !isShown(n) || isAncestor(exclude, n)) return;
-    const { rect } = getINode(n)!.state;
-    const pad = 6;
-    if (
-      x < rect.x - pad ||
-      x > rect.x + rect.width + pad ||
-      y < rect.y - pad ||
-      y > rect.y + rect.height + pad
-    ) {
-      return;
-    }
-    const ratio = (y - rect.y + pad) / (rect.height + pad * 2);
-    let position: DropPosition = 'child';
-    if (n.id !== rootMid && n.kind !== 'root') {
-      if (ratio < 0.3) position = 'before';
-      else if (ratio > 0.7) position = 'after';
-    }
-    if (position === 'child' && n.kind === 'block') position = 'after';
-    hit = { node: n, position };
+svgEl.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const down = rightDown;
+  rightDown = null;
+  if (
+    down &&
+    (down.moved || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4)
+  ) {
+    return; // it was a pan
+  }
+  if (editing) finishEdit(true);
+  const node = nodeAt(e);
+  if (node) {
+    if (!isSelected(node)) selectNode(node, false);
+    showMenu(e.clientX, e.clientY, nodeMenu());
+  } else {
+    showMenu(e.clientX, e.clientY, canvasMenu());
+  }
+  focusInput();
+});
+
+function dropTarget(clientX: number, clientY: number, nodes: MNode[]) {
+  const node = pickNode(clientX, clientY, (n) =>
+    nodes.some((d) => isAncestor(d, n)),
+  );
+  if (!node) return undefined;
+  const { y } = toMap(clientX, clientY);
+  const r = getINode(node)!.state.rect;
+  const pad = 6;
+  const ratio = (y - r.y + pad) / (r.height + pad * 2);
+  let position: DropPosition = 'child';
+  if (!isRootNode(node) && node !== viewRoot()) {
+    if (ratio < 0.3) position = 'before';
+    else if (ratio > 0.7) position = 'after';
+  }
+  if (position === 'child' && node.kind === 'block') position = 'after';
+  return { node, position };
+}
+
+function updateMarquee(e: MouseEvent) {
+  const m = marquee!;
+  if (!m.active) {
+    if (Math.hypot(e.clientX - m.x, e.clientY - m.y) < 4) return;
+    m.active = true;
+    marqueeEl.hidden = false;
+  }
+  const left = Math.min(m.x, e.clientX);
+  const right = Math.max(m.x, e.clientX);
+  const top = Math.min(m.y, e.clientY);
+  const bottom = Math.max(m.y, e.clientY);
+  Object.assign(marqueeEl.style, {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${right - left}px`,
+    height: `${bottom - top}px`,
   });
-  return hit;
+  const hits: MNode[] = [];
+  walk(doc.root, (n) => {
+    if (!isShown(n)) return;
+    const r = clientRect(n);
+    if (
+      r.right >= left &&
+      r.left <= right &&
+      r.bottom >= top &&
+      r.top <= bottom
+    )
+      hits.push(n);
+  });
+  if (m.additive) {
+    const all = [...m.base, ...hits.filter((n) => !m.base.includes(n))];
+    setSelection(m.basePrimary || all[0] || null, all, false);
+  } else if (hits.length) {
+    setSelection(hits[0], hits, false);
+  } else {
+    setSelection(m.basePrimary, [], false);
+  }
 }
 
 window.addEventListener('mousemove', (e) => {
-  if (!drag) return;
+  if (marquee) {
+    updateMarquee(e);
+    return;
+  }
+  if (!drag || !drag.nodes.length) return;
   if (!drag.active) {
     if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 5) return;
     drag.active = true;
     const ghost = document.createElement('div');
     ghost.className = 'mm-ghost';
-    ghost.textContent = drag.node.text || '(empty)';
+    const more = drag.nodes.length - 1;
+    ghost.textContent =
+      (drag.nodes[0].text || '(empty)') + (more ? `  +${more}` : '');
     document.body.append(ghost);
     drag.ghost = ghost;
     app.classList.add('is-dragging');
   }
   drag.ghost!.style.left = `${e.clientX + 12}px`;
   drag.ghost!.style.top = `${e.clientY + 8}px`;
-  drag.target = hitTest(e.clientX, e.clientY, drag.node);
+  drag.target = dropTarget(e.clientX, e.clientY, drag.nodes);
   const target = drag.target;
   if (!target) {
     dropRect.style('display', 'none');
@@ -1039,29 +1902,43 @@ window.addEventListener('mousemove', (e) => {
   }
 });
 
-window.addEventListener('mouseup', () => {
+window.addEventListener('mouseup', (e) => {
+  if (e.button !== 0) return;
+  if (marquee) {
+    const m = marquee;
+    marquee = null;
+    marqueeEl.hidden = true;
+    if (m.active) suppressNextClick();
+    else if (!m.additive && extra.size) selectNode(selected, false);
+    return;
+  }
   const state = drag;
   drag = null;
-  if (!state?.active) return;
-  suppressClick = true;
-  setTimeout(() => (suppressClick = false), 0);
+  if (!state) return;
+  if (!state.active) {
+    if (state.collapse) selectNode(state.anchor, false);
+    return;
+  }
+  suppressNextClick();
   state.ghost?.remove();
   app.classList.remove('is-dragging');
   dropRect.style('display', 'none');
   const target = state.target;
   if (!target) return;
   structural(
-    () => moveTo(doc, state.node, target.node, target.position),
-    state.node,
+    () => moveMany(state.nodes, target.node, target.position),
+    selected,
   );
 });
 
 // Clicking on the blank canvas keeps keyboard focus in the editor.
 svgEl.addEventListener('mouseup', () => {
-  if (!editing) setTimeout(focusInput);
+  if (!editing && document.activeElement !== searchInput) {
+    setTimeout(focusInput);
+  }
 });
 window.addEventListener('focus', () => {
-  if (!editing) focusInput();
+  if (!editing && document.activeElement !== searchInput) focusInput();
 });
 
 select(window).on('resize.mmEditor', () => positionInput());

@@ -213,3 +213,182 @@ svg.markmap {
 .mm-status.show {
   opacity: 1;
 }
+
+/* Short topics get a minimum width so they are easy to hit. */
+.markmap-foreign > div > div {
+  min-width: 2.5em;
+}
+
+.mm-selection {
+  fill: color-mix(in srgb, var(--mm-accent) 12%, transparent);
+  stroke-dasharray: 3 2;
+}
+
+.mm-selection.primary {
+  fill: color-mix(in srgb, var(--mm-accent) 18%, transparent);
+  stroke-dasharray: none;
+}
+
+.mm-match {
+  fill: color-mix(in srgb, #f5c400 28%, transparent);
+  stroke: none;
+  pointer-events: none;
+}
+
+.mm-match.current {
+  fill: color-mix(in srgb, #ff9800 40%, transparent);
+  stroke: #ff9800;
+  stroke-width: 1.5px;
+}
+
+.mm-marquee {
+  position: fixed;
+  border: 1px solid var(--mm-accent);
+  background: color-mix(in srgb, var(--mm-accent) 10%, transparent);
+  pointer-events: none;
+  z-index: 15;
+}
+
+.mm-side {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  background: var(--mm-panel-bg);
+  border: 1px solid var(--mm-panel-border);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 6;
+}
+
+.mm-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mm-label {
+  min-width: 34px;
+  opacity: 0.7;
+}
+
+.mm-side button,
+.mm-menu-markers button {
+  border: none;
+  background: var(--mm-button-bg);
+  color: var(--mm-button-fg);
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  line-height: 18px;
+}
+
+.mm-side button:hover,
+.mm-menu-markers button:hover {
+  background: var(--mm-button-hover);
+}
+
+.mm-search-input {
+  width: 130px;
+  padding: 2px 6px;
+  border: 1px solid var(--vscode-input-border, var(--mm-panel-border));
+  border-radius: 3px;
+  outline: none;
+  background: var(--vscode-input-background, #fff);
+  color: var(--vscode-input-foreground, var(--mm-fg));
+  font: inherit;
+}
+
+.mm-search-input:focus {
+  border-color: var(--mm-accent);
+}
+
+.mm-search.no-match .mm-search-input {
+  border-color: var(--vscode-inputValidation-errorBorder, #e51400);
+}
+
+.mm-search-count {
+  min-width: 32px;
+  text-align: center;
+  opacity: 0.8;
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-banner {
+  position: absolute;
+  left: 50%;
+  top: 48px;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  border-radius: 12px;
+  background: var(--mm-accent);
+  color: #fff;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.mm-banner a {
+  color: inherit;
+  font-weight: bold;
+}
+
+.mm-menu {
+  position: fixed;
+  min-width: 230px;
+  padding: 4px 0;
+  background: var(--vscode-menu-background, var(--mm-panel-bg));
+  color: var(--vscode-menu-foreground, var(--mm-fg));
+  border: 1px solid var(--vscode-menu-border, var(--mm-panel-border));
+  border-radius: 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  z-index: 40;
+  user-select: none;
+}
+
+.mm-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+
+.mm-menu-item:hover:not(.disabled) {
+  background: var(--vscode-menu-selectionBackground, var(--mm-accent));
+  color: var(--vscode-menu-selectionForeground, #fff);
+}
+
+.mm-menu-item.disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mm-menu-item kbd {
+  font: inherit;
+  opacity: 0.7;
+}
+
+.mm-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--vscode-menu-separatorBackground, var(--mm-panel-border));
+}
+
+.mm-menu-markers {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 14px;
+}
+
+.mm-menu-markers span {
+  flex: 1;
+}
+
+.mm-svg {
+  cursor: default;
+}

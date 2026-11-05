@@ -17,6 +17,8 @@ import {
   reconcile,
   remove,
   serialize,
+  setMarker,
+  splitMarker,
   subtreeToMarkdown,
 } from '../src/model';
 
@@ -301,6 +303,24 @@ describe('operations', () => {
     const node = addChild(doc, doc.root, 'Hello');
     expect(node.kind).toBe('heading');
     expect(serialize(doc)).toBe('# Hello\n');
+  });
+
+  test('markers', () => {
+    expect(setMarker('task', '🔴')).toBe('🔴 task');
+    expect(setMarker('🔴 task', '🟢')).toBe('🟢 task');
+    expect(setMarker('🔴 🟡 task', null)).toBe('task');
+    expect(setMarker('[ ] task', '🟡')).toBe('[ ] 🟡 task');
+    expect(splitMarker('[x] 🟢 done')).toMatchObject({
+      checkbox: '[x] ',
+      marker: '🟢',
+      prefix: '[x] 🟢 ',
+      rest: 'done',
+    });
+    expect(splitMarker('plain').marker).toBeNull();
+    const doc = parse('# R\n\n- [ ] 🔴 a\n');
+    const text = serialize(doc);
+    expect(text).toContain('- [ ] 🔴 a');
+    expectConsistent(doc, text);
   });
 
   test('reconcile keeps ids and folds', () => {

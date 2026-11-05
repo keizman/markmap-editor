@@ -6,3 +6,4 @@ build.mjs
 **/*.map
 *.vsix
 .gitignore
+*.png

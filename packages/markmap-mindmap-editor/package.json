@@ -2,7 +2,7 @@
   "name": "markmap-mindmap-editor",
   "displayName": "Markmap Mindmap Editor",
   "description": "Edit Markdown as a mindmap with XMind-style keyboard shortcuts (Enter / Tab / F2 / drag & drop...)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "publisher": "keizman",
   "license": "MIT",

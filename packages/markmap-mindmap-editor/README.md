@@ -60,17 +60,25 @@ To always open `*.mm.md` files as mindmaps, add to your settings:
 | <kbd>Enter</kbd> / <kbd>Esc</kbd> while editing | Finish / cancel                                 |
 | <kbd>Tab</kbd> while editing            | Finish and add a child                                  |
 | <kbd>Delete</kbd> / <kbd>Backspace</kbd> | Delete node and its children                           |
-| <kbd>Ctrl+Delete</kbd>                  | Delete node, keep its children                          |
+| <kbd>Ctrl+Delete</kbd> / <kbd>Ctrl+Backspace</kbd> | Delete single topic (keep its children)      |
 | Arrow keys                              | Select parent / child / sibling                         |
 | <kbd>Home</kbd>                         | Select root                                             |
+| Ctrl / Shift + click, drag on blank area | Multi-select (box select); drag selected topics together |
+| <kbd>Ctrl+A</kbd>                       | Select all                                              |
 | <kbd>Alt+↑</kbd> / <kbd>Alt+↓</kbd>     | Move node up / down                                     |
 | <kbd>Alt+→</kbd>                        | Indent (become child of previous sibling)               |
 | <kbd>Alt+←</kbd> / <kbd>Shift+Tab</kbd> | Outdent                                                 |
 | Drag & drop                             | Drop on a node → child; on its top/bottom edge → sibling |
-| <kbd>Ctrl+/</kbd>                       | Collapse / expand node                                  |
+| Right drag / wheel                      | Pan / zoom                                              |
+| Right click / <kbd>Shift+F10</kbd>      | Context menu (XMind style)                              |
+| <kbd>Ctrl+/</kbd>                       | Fold / unfold subtopics                                 |
+| <kbd>Ctrl+Alt+/</kbd>                   | Fold / unfold all sub-branches                          |
 | <kbd>Ctrl+Shift+/</kbd>                 | Collapse / expand node recursively                      |
+| <kbd>Ctrl+;</kbd>                       | Show branch only / show all (<kbd>Esc</kbd>)            |
 | <kbd>Alt+0</kbd>                        | Expand all                                              |
 | <kbd>Alt+1</kbd> … <kbd>Alt+9</kbd>     | Show N levels                                           |
+| <kbd>Ctrl+1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> | Toggle 🔴 / 🟡 / 🟢 marker                       |
+| <kbd>Ctrl+F</kbd>, <kbd>F3</kbd> / <kbd>Shift+F3</kbd> | Search, next / previous match             |
 | <kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd> | Copy / cut / paste as child (Markdown list text) |
 | <kbd>Ctrl+D</kbd>                       | Duplicate                                               |
 | <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>   | Undo / redo                                             |
@@ -79,6 +87,18 @@ To always open `*.mm.md` files as mindmaps, add to your settings:
 | <kbd>F1</kbd> / <kbd>?</kbd>            | Show shortcuts                                          |
 
 Clicking the circle of a node folds/unfolds it (Ctrl + click: recursively).
+
+## Markers & search
+
+The **Mark** buttons (top right, also in the context menu and on
+<kbd>Ctrl+1/2/3</kbd>) put 🔴 / 🟡 / 🟢 at the start of the text of every
+selected topic, e.g. `- 🔴 login fails on Safari`. Clicking the same marker
+again removes it, ⊘ clears it. Since markers are plain text they show up in
+the Markdown source too, and survive git, diffs and other editors.
+
+The search box finds topics by text; the marker buttons next to it search
+for a marker. <kbd>Enter</kbd> / <kbd>Shift+Enter</kbd> jump between
+matches, unfolding branches as needed; <kbd>Esc</kbd> clears the search.
 
 ## How Markdown is written
 

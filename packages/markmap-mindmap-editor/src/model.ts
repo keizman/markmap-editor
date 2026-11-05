@@ -813,3 +813,35 @@ export function reconcile(oldDoc: MDoc, newDoc: MDoc) {
   };
   match(oldDoc.root, newDoc.root);
 }
+
+/* ------------------------------------------------------------------------ */
+/* Markers                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Markers are plain emoji at the start of a node's text (after a task list
+ * checkbox), so they show up both in the mindmap and in the Markdown source
+ * and can be searched for.
+ */
+export const MARKERS = ['🔴', '🟡', '🟢'];
+
+const RE_PREFIX = /^(\[[ xX]\]\s+)?((?:(?:🔴|🟡|🟢)️?\s*)*)/u;
+
+export function splitMarker(text: string) {
+  const m = RE_PREFIX.exec(text)!;
+  const checkbox = m[1] || '';
+  const markers = m[2] || '';
+  return {
+    checkbox,
+    marker: MARKERS.find((k) => markers.includes(k)) ?? null,
+    /** Checkbox and markers, i.e. what precedes the actual text. */
+    prefix: m[0],
+    rest: text.slice(m[0].length),
+  };
+}
+
+/** Replace the marker of `text` (`null` removes it). */
+export function setMarker(text: string, marker: string | null) {
+  const { checkbox, rest } = splitMarker(text);
+  return checkbox + (marker ? `${marker} ` : '') + rest;
+}
