@@ -6,6 +6,7 @@ import {
   addChild,
   addSibling,
   findById,
+  getEditText,
   indent,
   isHiddenByMarkmap,
   insertParent,
@@ -17,6 +18,7 @@ import {
   reconcile,
   remove,
   serialize,
+  setEditText,
   setMarker,
   splitMarker,
   subtreeToMarkdown,
@@ -321,6 +323,90 @@ describe('operations', () => {
     const text = serialize(doc);
     expect(text).toContain('- [ ] 🔴 a');
     expectConsistent(doc, text);
+  });
+
+  test('special characters are displayed as typed', () => {
+    const samples = [
+      'a > b',
+      '> quoted',
+      '>>',
+      '<abc>',
+      'a<b>c',
+      'if a<b and c>d',
+      '- not a list',
+      '* star',
+      '+ plus',
+      '1. one',
+      '2) two',
+      '# not a heading',
+      '---',
+      '===',
+      '```',
+      '&lt; entity',
+      'C# and F#',
+      'ends with #',
+      '`<code>` and $a<b$',
+      '**bold** stays',
+    ];
+    for (const kind of ['list', 'heading'] as const) {
+      for (const s of samples) {
+        const doc = parse('# R\n\n- x\n');
+        const node =
+          kind === 'list'
+            ? doc.root.children[0].children[0]
+            : addChild(doc, doc.root, 'tmp');
+        if (kind === 'heading') expect(node.kind).toBe('heading');
+        setEditText(node, s);
+        expect(getEditText(node), `${kind}: ${s}`).toBe(s);
+        // Survives a round trip through the file.
+        const again = parse(serialize(doc));
+        const found = again.root.children
+          .flatMap((c) => [c, ...c.children])
+          .find((c) => c.line === node.line)!;
+        expect(getEditText(found), `${kind} reparsed: ${s}`).toBe(s);
+        expectConsistent(again, serialize(doc));
+      }
+    }
+    const doc = parse('# R\n\n- x\n');
+    const item = doc.root.children[0].children[0];
+    setEditText(item, '> q <abc> **b** `<c>`');
+    const html = transformer.transform(serialize(doc)).root.children![0]
+      .content;
+    expect(html).toBe(
+      '&gt; q &lt;abc&gt; <strong>b</strong> <code>&lt;c&gt;</code>',
+    );
+  });
+
+  test('raw HTML already in the file is kept', () => {
+    const doc = parse('# R\n\n- <span style="color:red">red</span> x\n');
+    const item = doc.root.children[0].children[0];
+    expect(getEditText(item)).toBe('<span style="color:red">red</span> x');
+    setEditText(item, '<span style="color:red">red</span> y <b>');
+    expect(item.text).toBe('<span style="color:red">red</span> y \\<b>');
+  });
+
+  test('line breaks', () => {
+    const doc = parse('# R\n\n## H\n\n- a\n- b\n');
+    const [h] = doc.root.children[0].children;
+    const a = h.children[0];
+    setEditText(a, 'line 1\n- line 2\nline 3');
+    setEditText(h, 'H1\nH2');
+    const text = serialize(doc);
+    expect(text).toBe(
+      '# R\n\n## H1<br>H2\n\n- line 1\n  \\- line 2\n  line 3\n- b\n',
+    );
+    const again = parse(text);
+    const h2 = again.root.children[0].children[0];
+    expect(getEditText(h2)).toBe('H1\nH2');
+    expect(getEditText(h2.children[0])).toBe('line 1\n- line 2\nline 3');
+    expectConsistent(again, text);
+    // markmap drops the empty root: `R` is the root.
+    const html =
+      transformer.transform(text).root.children![0].children![0].content;
+    expect(html).toBe('line 1<br>\n- line 2<br>\nline 3');
+    // A multi-line list item turned into a heading keeps its lines.
+    moveTo(again, h2.children[0], h2, 'after');
+    expect(serialize(again)).toContain('## line 1<br>\\- line 2<br>line 3');
   });
 
   test('reconcile keeps ids and folds', () => {

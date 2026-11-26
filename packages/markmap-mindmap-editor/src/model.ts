@@ -336,6 +336,22 @@ function toListItem(node: MNode, bullet: string) {
   node.blankBefore = false;
 }
 
+/** Turn a node into a heading; extra paragraph lines join with `<br>`. */
+function toHeading(node: MNode, level: number) {
+  if (node.kind === 'list') {
+    const n = paragraphLength(node);
+    if (n) {
+      node.text = [node.text, ...node.extra.slice(0, n).map((l) => l.trim())]
+        .filter(Boolean)
+        .join('<br>');
+      node.extra = node.extra.slice(n);
+    }
+  }
+  node.kind = 'heading';
+  node.level = level;
+  node.ordered = false;
+}
+
 /** Blocks that markmap renders as nodes: code blocks, tables and images. */
 export function isVisualBlock(node: MNode) {
   if (node.kind !== 'block') return false;
@@ -372,9 +388,7 @@ function adoptKind(doc: MDoc, node: MNode) {
   const heading = others.find((c) => c.kind === 'heading');
   if (heading && node.kind !== 'heading') {
     if (node.kind === 'block') return;
-    node.kind = 'heading';
-    node.level = heading.level;
-    node.ordered = false;
+    toHeading(node, heading.level);
     node.blankBefore = true;
   } else if (!heading && others.length && node.kind === 'heading') {
     toListItem(node, others[0].marker || doc.bullet);
@@ -383,8 +397,7 @@ function adoptKind(doc: MDoc, node: MNode) {
     parent.kind === 'root' &&
     node.kind !== 'block'
   ) {
-    node.kind = 'heading';
-    node.level = 1;
+    toHeading(node, 1);
   }
   // List items next to code blocks / tables would be hidden: turn those
   // blocks into list items, which markmap renders with the same content.
@@ -439,9 +452,7 @@ export function normalize(doc: MDoc) {
           toListItem(child, doc.bullet);
         } else {
           if (child.kind === 'list') child.blankBefore = true;
-          child.kind = 'heading';
-          child.level = level;
-          child.ordered = false;
+          toHeading(child, level);
           seenHeading = true;
           prevLevel = level;
         }
@@ -844,4 +855,134 @@ export function splitMarker(text: string) {
 export function setMarker(text: string, marker: string | null) {
   const { checkbox, rest } = splitMarker(text);
   return checkbox + (marker ? `${marker} ` : '') + rest;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Topic text as typed by the user                                           */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Number of list item continuation lines that belong to its first paragraph,
+ * i.e. the lines shown (and edited) as the topic text.
+ */
+function paragraphLength(node: MNode) {
+  let n = 0;
+  while (n < node.extra.length) {
+    const line = node.extra[n];
+    if (!line.trim() || /^ {4}/.test(line) || matchFenceOpen(line)) break;
+    n += 1;
+  }
+  return n;
+}
+
+const RE_BR = /<br\s*\/?>/i;
+/** Code spans and math keep their content verbatim. */
+const RE_VERBATIM = /(`+)[\s\S]*?\1|\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g;
+
+function mapOutsideVerbatim(text: string, fn: (part: string) => string) {
+  let out = '';
+  let last = 0;
+  for (const m of text.matchAll(RE_VERBATIM)) {
+    out += fn(text.slice(last, m.index)) + m[0];
+    last = m.index! + m[0].length;
+  }
+  return out + fn(text.slice(last));
+}
+
+/** Raw HTML tags already present in the source; they are kept as HTML. */
+function rawTags(text: string) {
+  const tags: string[] = [];
+  mapOutsideVerbatim(text, (part) => {
+    for (const m of part.matchAll(
+      /(^|[^\\])(<\/?[A-Za-z][^<>]*>|<!--.*?-->)/g,
+    )) {
+      tags.push(m[2]);
+    }
+    return part;
+  });
+  return tags;
+}
+
+/** Escape characters that would turn the line into a block (quote, list...). */
+function escapeLineStart(line: string) {
+  if (
+    /^(>|#{1,6}(\s|$)|[-*+](\s|$)|`{3,}|~{3,}|=+\s*$)/.test(line) ||
+    RE_HR.test(line)
+  ) {
+    return `\\${line}`;
+  }
+  const m = /^(\d{1,9})([.)](\s|$))/.exec(line);
+  return m ? `${m[1]}\\${line.slice(m[1].length)}` : line;
+}
+
+function unescapeLineStart(line: string) {
+  const candidates = [line.replace(/^\\/, ''), line.replace(/^(\d+)\\/, '$1')];
+  return (
+    candidates.find((c) => c !== line && escapeLineStart(c) === line) ?? line
+  );
+}
+
+function escapeText(line: string, keep: string[], heading: boolean) {
+  let text = mapOutsideVerbatim(line, (part) =>
+    part.replace(/<(?=[A-Za-z/!?])|&(?=#?\w+;)/g, (ch, offset: number) =>
+      ch === '<' && keep.some((tag) => part.startsWith(tag, offset))
+        ? ch
+        : `\\${ch}`,
+    ),
+  );
+  text = escapeLineStart(text);
+  // A trailing ` ###` would be read as the closing sequence of the heading.
+  if (heading) text = text.replace(/(\s)(#+)$/, '$1\\$2');
+  return text;
+}
+
+function unescapeText(line: string, heading: boolean) {
+  let text = heading ? line.replace(/(\s)\\(#+)$/, '$1$2') : line;
+  text = unescapeLineStart(text);
+  return mapOutsideVerbatim(text, (part) =>
+    part.replace(/\\(<(?=[A-Za-z/!?])|&(?=#?\w+;))/g, '$1'),
+  );
+}
+
+/**
+ * The text of a topic as shown in the inline editor: special characters
+ * unescaped, one line per line break.
+ */
+export function getEditText(node: MNode): string {
+  if (node.kind === 'block' || node.kind === 'root') return node.text;
+  const heading = node.kind === 'heading';
+  const lines = heading
+    ? [node.text]
+    : [node.text, ...node.extra.slice(0, paragraphLength(node))];
+  return lines
+    .flatMap((line) => line.split(RE_BR))
+    .map((line) => unescapeText(line.trim(), heading))
+    .join('\n');
+}
+
+/**
+ * Set the text of a topic from the inline editor. Characters that Markdown
+ * would interpret (`>`, `<tag>`, `- `, `# `...) are escaped so that they are
+ * displayed as typed. Line breaks become continuation lines in list items
+ * and `<br>` in headings.
+ */
+export function setEditText(node: MNode, value: string) {
+  if (node.kind === 'block' || node.kind === 'root') {
+    node.text = value;
+    return;
+  }
+  const heading = node.kind === 'heading';
+  const n = heading ? 0 : paragraphLength(node);
+  const keep = rawTags([node.text, ...node.extra.slice(0, n)].join('\n'));
+  const lines = value
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => escapeText(line, keep, heading));
+  if (heading) {
+    node.text = lines.join('<br>');
+  } else {
+    node.text = lines[0] || '';
+    node.extra = [...lines.slice(1), ...node.extra.slice(n)];
+  }
 }

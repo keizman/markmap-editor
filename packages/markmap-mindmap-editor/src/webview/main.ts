@@ -24,6 +24,8 @@ import {
   remove,
   removeKeepChildren,
   serialize,
+  getEditText,
+  setEditText,
   setMarker,
   splitMarker,
   subtreeToMarkdown,
@@ -112,6 +114,7 @@ app.innerHTML = `
     <tr><td>Ctrl+Enter</td><td>Insert parent</td></tr>
     <tr><td>F2 / Space / double click / just type</td><td>Edit text</td></tr>
     <tr><td>Enter / Esc (while editing)</td><td>Finish / cancel editing</td></tr>
+    <tr><td>Shift+Enter (while editing)</td><td>New line inside the topic</td></tr>
     <tr><td>Tab (while editing)</td><td>Finish and add child</td></tr>
     <tr><td>Delete / Backspace</td><td>Delete topic with its children</td></tr>
     <tr><td>Ctrl+Delete / Ctrl+Backspace</td><td>Delete single topic (keep its children)</td></tr>
@@ -765,7 +768,7 @@ function computeMatches() {
       if (
         n.kind !== 'root' &&
         rendered.has(n.id) &&
-        n.text.toLowerCase().includes(q)
+        getEditText(n).toLowerCase().includes(q)
       ) {
         matches.push(n);
       }
@@ -888,7 +891,7 @@ function startEdit(
   editing = {
     node,
     isNew: !!opts.isNew,
-    original: node.text,
+    original: getEditText(node),
     multiline,
     fallback: opts.fallback ?? null,
     keepPrefix: opts.replace && !multiline ? splitMarker(node.text).prefix : '',
@@ -897,7 +900,7 @@ function startEdit(
   input.classList.add('editing');
   input.classList.toggle('multiline', multiline);
   if (!opts.replace) {
-    input.value = node.text;
+    input.value = getEditText(node);
     input.setSelectionRange(input.value.length, input.value.length);
   }
   app.classList.add('is-editing');
@@ -911,7 +914,11 @@ async function finishEdit(save = true, then?: 'child' | 'sibling') {
   editing = null;
   let value = state.multiline
     ? input.value.replace(/\s+$/, '')
-    : input.value.replace(/\s*\n\s*/g, ' ').trim();
+    : input.value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join('\n');
   // Typing over a node replaces its text but keeps its checkbox / marker.
   if (value && state.keepPrefix && !splitMarker(value).prefix) {
     value = state.keepPrefix + value;
@@ -931,7 +938,7 @@ async function finishEdit(save = true, then?: 'child' | 'sibling') {
     return;
   }
   const changed = save && value !== state.original;
-  if (changed) node.text = value;
+  if (changed) setEditText(node, value);
   if (then) {
     // Chain the next node immediately; it renders everything at once.
     if (changed || state.isNew) {
@@ -1487,7 +1494,11 @@ function handleEditKey(e: KeyboardEvent) {
     finishEdit(false);
   } else if (e.key === 'Enter') {
     if (state.multiline && !(e.ctrlKey || e.metaKey)) return;
-    if (!state.multiline && e.shiftKey) return; // ignore, keep single line
+    // Shift+Enter: line break inside the topic (native textarea newline).
+    if (!state.multiline && e.shiftKey) {
+      requestAnimationFrame(() => positionInput());
+      return;
+    }
     e.preventDefault();
     finishEdit(true);
   } else if (e.key === 'Tab') {

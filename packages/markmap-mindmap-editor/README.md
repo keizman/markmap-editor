@@ -58,6 +58,7 @@ To always open `*.mm.md` files as mindmaps, add to your settings:
 | <kbd>F2</kbd> / <kbd>Space</kbd> / double click | Edit text                                       |
 | just start typing                       | Replace the text of the selected node (IME supported)   |
 | <kbd>Enter</kbd> / <kbd>Esc</kbd> while editing | Finish / cancel                                 |
+| <kbd>Shift+Enter</kbd> while editing    | New line inside the topic                               |
 | <kbd>Tab</kbd> while editing            | Finish and add a child                                  |
 | <kbd>Delete</kbd> / <kbd>Backspace</kbd> | Delete node and its children                           |
 | <kbd>Ctrl+Delete</kbd> / <kbd>Ctrl+Backspace</kbd> | Delete single topic (keep its children)      |
@@ -112,5 +113,11 @@ matches, unfolding branches as needed; <kbd>Esc</kbd> clears the search.
   to new list items are turned into list items containing them.
 - Content that markmap does not show as nodes (paragraphs, frontmatter,
   blockquotes...) is kept as-is.
+- Topic text is shown as typed: characters Markdown would interpret, such
+  as a leading `>`, `- ` or `# `, or `<tag>`, are escaped (`\>`, `\<tag>`).
+  Raw HTML already in the file is kept. Inline Markdown (`**bold**`,
+  `` `code` ``, links, math) still works.
+- Line breaks (<kbd>Shift+Enter</kbd>) become continuation lines in list
+  items and `<br>` in headings.
 - Folding is a view state and is not written to the file. Initial folding
   still honours `<!-- markmap: fold -->` and `initialExpandLevel`.
